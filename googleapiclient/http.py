@@ -1069,12 +1069,16 @@ class BatchHttpRequest(object):
     Raises:
       BatchError if the header is not in the expected format.
     """
+    # print("header=", repr(header))
+    if header.startswith('response-'):
+        header = header[9:].strip()
+    # print("header=", repr(header))
+
     if header[0] != '<' or header[-1] != '>':
       raise BatchError("Invalid value for Content-ID: %s" % header)
     if '+' not in header:
       raise BatchError("Invalid value for Content-ID: %s" % header)
     base, id_ = header[1:-1].rsplit('+', 1)
-
     return unquote(id_)
 
   def _serialize_request(self, request):
@@ -1375,7 +1379,8 @@ class BatchHttpRequest(object):
         exception = e
 
       if callback is not None:
-        callback(request_id, response, exception)
+        # import pdb; pdb.set_trace()
+        callback(response['id'], response, exception)
       if self._callback is not None:
         self._callback(request_id, response, exception)
 

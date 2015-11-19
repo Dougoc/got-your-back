@@ -24,7 +24,7 @@ global __name__, __author__, __email__, __version__, __license__
 __program_name__ = 'Got Your Back: Gmail Backup'
 __author__ = 'Jay Lee'
 __email__ = 'jay0lee@gmail.com'
-__version__ = '0.41'
+__version__ = '0.40'
 __license__ = 'Apache License 2.0 (http://www.apache.org/licenses/LICENSE-2.0)'
 __website__ = 'http://git.io/gyb'
 __db_schema_version__ = '6'
@@ -126,7 +126,7 @@ Account to authenticate.')
     choices=list(range(1,101)),
     default=0, # default of 0 means use per action default
     help='Optional: Sets the number of batch operations to perform at once.')
-  parser.add_argument('--noresume', 
+  parser.add_argument('--noresume',
     action='store_true',
     help='Optional: On restores, start from beginning. Default is to resume \
 where last restore left off.')
@@ -312,8 +312,8 @@ def doGYBCheckForUpdates():
     except ValueError:
       return
     if latest_version <= current_version:
-      f = open(last_update_check_file, 'w')
-      f.write(str(now_time))
+      f = open(last_update_check_file, 'wb')
+      f.write(str(now_time).encode('utf-8'))
       f.close()
       return
     announceUrl = 'https://gyb-update.appspot.com/\
@@ -332,7 +332,7 @@ file named %s and GYB won't ever check for updates: " % no_update_check_file)
       print('GYB is now exiting so that you can overwrite this old version \
 with the latest release')
       sys.exit(0)
-    f = open(last_update_check_file, 'w')
+    f = open(last_update_check_file, 'wb')
     f.write(str(now_time))
     f.close()
   except urllib.error.HTTPError:
@@ -370,7 +370,7 @@ def buildGAPIObject(api):
   if credentials is None or credentials.invalid:
     doRequestOAuth()
     credentials = storage.get()
-  credentials.user_agent = getGYBVersion(' | ') 
+  credentials.user_agent = getGYBVersion(' | ')
   disable_ssl_certificate_validation = False
   if os.path.isfile(getProgPath()+'noverifyssl.txt'):
     disable_ssl_certificate_validation = True
@@ -392,7 +392,7 @@ def buildGAPIObject(api):
   except googleapiclient.errors.UnknownApiNameOrVersion:
     disc_file = getProgPath()+'%s-%s.json' % (api, version)
     if os.path.isfile(disc_file):
-      f = file(disc_file, 'r')
+      f = file(disc_file, 'rb')
       discovery = f.read()
       f.close()
       return googleapiclient.discovery.build_from_document(discovery,
@@ -411,7 +411,7 @@ def buildGAPIServiceObject(api, soft_errors=False):
   oauth2servicefile = getProgPath()+'oauth2service'
   oauth2servicefilejson = '%s.json' % oauth2servicefile
   try:
-    json_string = open(oauth2servicefilejson, 'r').read()
+    json_string = open(oauth2servicefilejson, 'rb').read()
   except IOError as e:
     print('Error: %s' % e)
     print('')
@@ -569,7 +569,7 @@ def message_is_backed_up(message_num, sqlcur, sqlconn, backup_folder):
 def get_db_settings(sqlcur):
   try:
     sqlcur.execute('SELECT name, value FROM settings')
-    db_settings = dict(sqlcur) 
+    db_settings = dict(sqlcur)
     return db_settings
   except sqlite3.OperationalError as e:
     if e.message == 'no such table: settings':
@@ -577,7 +577,7 @@ def get_db_settings(sqlcur):
 database schema. Your backup folder database does not have a version."
  % (__db_schema_version__))
       sys.exit(6)
-    else: 
+    else:
       print("%s" % e)
 
 def check_db_settings(db_settings, action, user_email_address):
@@ -606,9 +606,9 @@ def convertDB(sqlconn, uidvalidity, oldversion):
         # Convert to schema 3
         sqlconn.executescript('''
           BEGIN;
-          CREATE TABLE uids 
-              (message_num INTEGER, uid INTEGER PRIMARY KEY); 
-          INSERT INTO uids (uid, message_num) 
+          CREATE TABLE uids
+              (message_num VARCHAR(100), uid INTEGER PRIMARY KEY);
+          INSERT INTO uids (uid, message_num)
                SELECT message_num as uid, message_num FROM messages;
           CREATE INDEX labelidx ON labels (message_num);
           CREATE INDEX flagidx ON flags (message_num);
@@ -631,30 +631,30 @@ def convertDB(sqlconn, uidvalidity, oldversion):
         getMessageIDs(sqlconn, options.local_folder)
         rebuildUIDTable(sqlconn)
       sqlconn.executemany('REPLACE INTO settings (name, value) VALUES (?,?)',
-                        (('uidvalidity',uidvalidity), 
-                         ('db_version', __db_schema_version__)) )   
+                        (('uidvalidity',uidvalidity),
+                         ('db_version', __db_schema_version__)) )
       sqlconn.commit()
   except sqlite3.OperationalError as e:
       print("Conversion error: %s" % e.message)
 
   print("GYB database converted to version %s" % __db_schema_version__)
 
-def getMessageIDs (sqlconn, backup_folder):   
+def getMessageIDs (sqlconn, backup_folder):
   sqlcur = sqlconn.cursor()
   header_parser = email.parser.HeaderParser()
   for message_num, filename in sqlconn.execute('''
-               SELECT message_num, message_filename FROM messages 
+               SELECT message_num, message_filename FROM messages
                       WHERE rfc822_msgid IS NULL'''):
     message_full_filename = os.path.join(backup_folder, filename)
     if os.path.isfile(message_full_filename):
-      f = open(message_full_filename, 'r')
+      f = open(message_full_filename, 'rb')
       msgid = header_parser.parse(f, True).get('message-id') or '<DummyMsgID>'
       f.close()
       sqlcur.execute(
           'UPDATE messages SET rfc822_msgid = ? WHERE message_num = ?',
                      (msgid, message_num))
   sqlconn.commit()
- 
+
 def rebuildUIDTable(sqlconn):
   pass
 
@@ -690,15 +690,15 @@ def rewrite_line(mystring):
 
 def initializeDB(sqlcur, sqlconn, email):
   sqlcur.executescript('''
-   CREATE TABLE messages(message_num INTEGER PRIMARY KEY, 
-                         message_filename TEXT, 
+   CREATE TABLE messages(message_num VARCHAR(100) PRIMARY KEY,
+                         message_filename TEXT,
                          message_internaldate TIMESTAMP);
-   CREATE TABLE labels (message_num INTEGER, label TEXT);
-   CREATE TABLE uids (message_num INTEGER, uid TEXT PRIMARY KEY);
+   CREATE TABLE labels (message_num VARCHAR(100), label TEXT);
+   CREATE TABLE uids (message_num VARCHAR(100), uid TEXT PRIMARY KEY);
    CREATE TABLE settings (name TEXT PRIMARY KEY, value TEXT);
    CREATE UNIQUE INDEX labelidx ON labels (message_num, label);
   ''')
-  sqlcur.executemany('INSERT INTO settings (name, value) VALUES (?, ?)', 
+  sqlcur.executemany('INSERT INTO settings (name, value) VALUES (?, ?)',
          (('email_address', email),
           ('db_version', __db_schema_version__)))
   sqlconn.commit()
@@ -779,13 +779,13 @@ def refresh_message(request_id, response, exception):
       sqlcur.executemany(
            'INSERT INTO current_labels (label) VALUES (?)',
               ((label,) for label in labels))
-      sqlcur.execute("""DELETE FROM labels where message_num = 
+      sqlcur.execute("""DELETE FROM labels where message_num =
                    (SELECT message_num from uids where uid = ?)
                     AND label NOT IN current_labels""", ((response['id']),))
-      sqlcur.execute("""INSERT INTO labels (message_num, label) 
-            SELECT message_num, label from uids, current_labels 
-               WHERE uid = ? AND label NOT IN 
-               (SELECT label FROM labels 
+      sqlcur.execute("""INSERT INTO labels (message_num, label)
+            SELECT message_num, label from uids, current_labels
+               WHERE uid = ? AND label NOT IN
+               (SELECT label FROM labels
                   WHERE message_num = uids.message_num)""",
                   ((response['id']),))
 
@@ -793,6 +793,7 @@ def restored_message(request_id, response, exception):
   if exception is not None:
     raise exception
   else:
+    print("request_id type=", type(request_id), repr(request_id))
     sqlconn.execute(
       '''INSERT OR IGNORE INTO restored_messages (message_num) VALUES (?)''',
       (request_id,))
@@ -840,7 +841,7 @@ def backup_message(request_id, response, exception):
     f.close()
     sqlcur.execute("""
              INSERT INTO messages (
-                         message_filename, 
+                         message_filename,
                          message_internaldate) VALUES (?, ?)""",
                         (message_rel_filename,
                          time_for_sqlite))
@@ -900,7 +901,7 @@ def main(argv):
   # Do we need to initialize a new database?
   newDB = (not os.path.isfile(sqldbfile)) and \
     (options.action in ['backup', 'restore-mbox'])
-  
+
   # If we're not doing a estimate or if the db file actually exists we open it
   # (creates db if it doesn't exist)
   if options.action not in ['count', 'purge', 'purge-labels',
@@ -973,7 +974,7 @@ def main(argv):
       rewrite_line("backed up %s of %s messages" %
         (backed_up_messages, backup_count))
     print("\n")
- 
+
     if not options.refresh:
       messages_to_refresh = []
     refreshed_messages = 0
@@ -1006,7 +1007,7 @@ def main(argv):
   elif options.action == 'restore':
     if options.batch_size == 0:
       options.batch_size = 10
-    resumedb = os.path.join(options.local_folder, 
+    resumedb = os.path.join(options.local_folder,
                             "%s-restored.sqlite" % options.email)
     if options.noresume:
       try:
@@ -1016,9 +1017,9 @@ def main(argv):
       except IOError:
         pass
     sqlcur.execute('ATTACH ? as resume', (resumedb,))
-    sqlcur.executescript('''CREATE TABLE IF NOT EXISTS resume.restored_messages 
-                        (message_num INTEGER PRIMARY KEY); 
-                        CREATE TEMP TABLE skip_messages (message_num INTEGER \
+    sqlcur.executescript('''CREATE TABLE IF NOT EXISTS resume.restored_messages
+                        (message_num VARCHAR(100) PRIMARY KEY);
+                        CREATE TEMP TABLE skip_messages (message_num VARCHAR(100) \
                           PRIMARY KEY);''')
     sqlcur.execute('''INSERT INTO skip_messages SELECT message_num from \
       restored_messages''')
@@ -1207,7 +1208,7 @@ def main(argv):
             # don't batch/raw >1mb messages, just do single
             rewrite_line(' restoring single large message (%s/%s)' %
               (current, restore_count))
-            media_body = googleapiclient.http.MediaInMemoryUpload(full_message,
+            media_body = googleapiclient.http.MediaInMemoryUpload(full_message.encode('ascii'),
               mimetype='message/rfc822')
             response = callGAPI(service=restore_serv, function=restore_func,
               userId='me', media_body=media_body, body=body,
@@ -1217,8 +1218,8 @@ def main(argv):
             rewrite_line(' restored single large message (%s/%s)' %
               (current, restore_count))
             continue
-          raw_message = base64.urlsafe_b64encode(full_message)
-          body['raw'] = raw_message
+          raw_message = base64.urlsafe_b64encode(full_message.encode('ascii'))
+          body['raw'] = raw_message.decode('utf-8')
           current_batch_bytes += len(raw_message)
           for labelId in labelIds:
             current_batch_bytes += len(labelId)
@@ -1275,8 +1276,8 @@ def main(argv):
         pass
     sqlcur.execute('ATTACH ? as resume', (resumedb,))
     sqlcur.executescript('''CREATE TABLE IF NOT EXISTS resume.restored_messages
-                      (message_num INTEGER PRIMARY KEY);
-       CREATE TEMP TABLE skip_messages (message_num INTEGER PRIMARY KEY);''')
+                      (message_num VARCHAR(100) PRIMARY KEY);
+       CREATE TEMP TABLE skip_messages (message_num VARCHAR(100) PRIMARY KEY);''')
     sqlcur.execute('''INSERT INTO skip_messages SELECT message_num
       FROM restored_messages''')
     sqlcur.execute('''SELECT message_num, message_internaldate,
@@ -1318,7 +1319,7 @@ def main(argv):
     sqlconn.execute('DETACH resume')
     sqlconn.commit()
 
-  # COUNT 
+  # COUNT
   elif options.action == 'count':
     if options.batch_size == 0:
       options.batch_size = 100
@@ -1380,7 +1381,7 @@ def main(argv):
       drive = buildGAPIServiceObject('drive')
     quota_results = callGAPI(service=drive.about(), function='get',
       fields='quotaBytesTotal,quotaBytesUsedInTrash,quotaBytesUsedAggregate,qu\
-otaBytesByService,quotaType')
+      otaBytesByService,quotaType')
     for key in quota_results:
       if key == 'quotaBytesByService':
         print('Service Usage:')
