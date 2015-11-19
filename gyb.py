@@ -792,6 +792,8 @@ def refresh_message(request_id, response, exception):
 def restored_message(request_id, response, exception):
   if exception is not None:
     raise exception
+  elif request_id is None:
+     return
   else:
     print("request_id type=", type(request_id), repr(request_id))
     sqlconn.execute(
@@ -1200,6 +1202,7 @@ def main(argv):
           labelIds = labelsToLabelIds(labels)
           del message['X-Gmail-Labels']
           del message['X-GM-THRID']
+          message['content-transfer-encoding'] = 'utf-8'
           rewrite_line(" message %s of %s" % (current, restore_count))
           full_message = message.as_string()
           body = {'labelIds': labelIds}

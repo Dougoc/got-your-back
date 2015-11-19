@@ -1373,14 +1373,19 @@ class BatchHttpRequest(object):
       exception = None
       try:
         if resp.status >= 300:
-          raise HttpError(resp, content, uri=request.uri)
-        response = request.postproc(resp, content)
+          print("error", resp.status, content, resp)
+          #raise HttpError(resp, content, uri=request.uri)
+        else:
+          response = request.postproc(resp, content)
       except HttpError as e:
-        exception = e
+        import logging
+        logging.exception("Erro no HTTP", e)
+        #exception = e
+        pass
 
       if callback is not None:
         # import pdb; pdb.set_trace()
-        callback(response['id'], response, exception)
+        callback(response['id'] if response else None, response, exception)
       if self._callback is not None:
         self._callback(request_id, response, exception)
 
