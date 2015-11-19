@@ -795,7 +795,6 @@ def restored_message(request_id, response, exception):
   elif request_id is None:
      return
   else:
-    print("request_id type=", type(request_id), repr(request_id))
     sqlconn.execute(
       '''INSERT OR IGNORE INTO restored_messages (message_num) VALUES (?)''',
       (request_id,))
@@ -1179,86 +1178,91 @@ def main(argv):
         print("\nRestoring from %s" % file_path)
         for message in mbox:
           current += 1
-          message_marker = '%s-%s' % (file_path, current)
-          if message_marker in messages_to_skip:
-            continue
-          restart_line()
-          labels = message['X-Gmail-Labels']
-          if labels != None and labels != '' and not options.strip_labels:
-            mybytes, encoding = email.header.decode_header(labels)[0]
-            if encoding != None:
-              try:
-                labels = mybytes.decode(encoding)
-              except UnicodeDecodeError:
-                pass
-            else:
-              labels = labels.decode('string-escape')
-            labels = labels.split(',')
-          else:
-            labels = []
-          if options.label_restored:
-            for restore_label in options.label_restored:
-              labels.append(restore_label)
-          labelIds = labelsToLabelIds(labels)
-          del message['X-Gmail-Labels']
-          del message['X-GM-THRID']
-          message['content-transfer-encoding'] = 'utf-8'
-          rewrite_line(" message %s of %s" % (current, restore_count))
-          full_message = message.as_string()
-          body = {'labelIds': labelIds}
-          b64_message_size = (len(full_message)/3) * 4
-          if b64_message_size > 1 * 1024 * 1024:
-            # don't batch/raw >1mb messages, just do single
-            rewrite_line(' restoring single large message (%s/%s)' %
-              (current, restore_count))
-            media_body = googleapiclient.http.MediaInMemoryUpload(full_message.encode('ascii'),
-              mimetype='message/rfc822')
-            response = callGAPI(service=restore_serv, function=restore_func,
-              userId='me', media_body=media_body, body=body,
-              deleted=options.vault, **restore_params)
-            restored_message(request_id=str(message_marker), response=response,
-              exception=None)
-            rewrite_line(' restored single large message (%s/%s)' %
-              (current, restore_count))
-            continue
-          raw_message = base64.urlsafe_b64encode(full_message.encode('ascii'))
-          body['raw'] = raw_message.decode('utf-8')
-          current_batch_bytes += len(raw_message)
-          for labelId in labelIds:
-            current_batch_bytes += len(labelId)
-          if len(gbatch._order) > 0 and current_batch_bytes > max_batch_bytes:
-            # this message would put us over max, execute current batch first
+
+          try:
+                  message_marker = '%s-%s' % (file_path, current)
+                  if message_marker in messages_to_skip:
+                    continue
+                  restart_line()
+                  labels = message['X-Gmail-Labels']
+                  if labels != None and labels != '' and not options.strip_labels:
+                    mybytes, encoding = email.header.decode_header(labels)[0]
+                    if encoding != None:
+                      try:
+                        labels = mybytes.decode(encoding)
+                      except UnicodeDecodeError:
+                        pass
+                    else:
+                      labels = labels.decode('string-escape')
+                    labels = labels.split(',')
+                  else:
+                    labels = []
+                  if options.label_restored:
+                    for restore_label in options.label_restored:
+                      labels.append(restore_label)
+                  labelIds = labelsToLabelIds(labels)
+                  del message['X-Gmail-Labels']
+                  del message['X-GM-THRID']
+                  #message.set_charset('utf-8')
+                  rewrite_line(" message %s of %s" % (current, restore_count))
+                  full_message = message.as_string()
+                  body = {'labelIds': labelIds}
+                  b64_message_size = (len(full_message)/3) * 4
+                  if b64_message_size > 1 * 1024 * 1024:
+                    # don't batch/raw >1mb messages, just do single
+                    rewrite_line(' restoring single large message (%s/%s)' %
+                      (current, restore_count))
+                    media_body = googleapiclient.http.MediaInMemoryUpload(full_message.encode('ascii'),
+                      mimetype='message/rfc822')
+                    response = callGAPI(service=restore_serv, function=restore_func,
+                      userId='me', media_body=media_body, body=body,
+                      deleted=options.vault, **restore_params)
+                    restored_message(request_id=str(message_marker), response=response,
+                      exception=None)
+                    rewrite_line(' restored single large message (%s/%s)' %
+                      (current, restore_count))
+                    continue
+                  raw_message = base64.urlsafe_b64encode(full_message.encode('ascii'))
+                  body['raw'] = raw_message.decode('utf-8')
+                  current_batch_bytes += len(raw_message)
+                  for labelId in labelIds:
+                    current_batch_bytes += len(labelId)
+                  if len(gbatch._order) > 0 and current_batch_bytes > max_batch_bytes:
+                    # this message would put us over max, execute current batch first
+                    rewrite_line("restoring %s messages (%s/%s)" %
+                      (len(gbatch._order), current, restore_count))
+                    gbatch.execute()
+                    gbatch = googleapiclient.http.BatchHttpRequest()
+                    sqlconn.commit()
+                    rewrite_line("restored %s messages (%s/%s)" %
+                      (len(gbatch._order), current, restore_count))
+                    current_batch_bytes = 5000
+                    largest_in_batch = 0
+                  gbatch.add(restore_method(userId='me',
+                    body=body, fields='id',
+                    deleted=options.vault, **restore_params),
+                    callback=restored_message,
+                    request_id=str(message_marker))
+                  if len(gbatch._order) == options.batch_size:
+                    rewrite_line("restoring %s messages (%s/%s)" %
+                      (len(gbatch._order), current, restore_count))
+                    gbatch.execute()
+                    gbatch = googleapiclient.http.BatchHttpRequest()
+                    sqlconn.commit()
+                    rewrite_line("restored %s messages (%s/%s)" %
+                      (len(gbatch._order), current, restore_count))
+                    current_batch_bytes = 5000
+                    largest_in_batch = 0
+          except:
+                import logging
+                logging.exception("erro processando.... ignorando")
+          if len(gbatch._order) > 0:
             rewrite_line("restoring %s messages (%s/%s)" %
-              (len(gbatch._order), current, restore_count))
+             (len(gbatch._order), current, restore_count))
             gbatch.execute()
-            gbatch = googleapiclient.http.BatchHttpRequest()
             sqlconn.commit()
-            rewrite_line("restored %s messages (%s/%s)" %
-              (len(gbatch._order), current, restore_count))
-            current_batch_bytes = 5000
-            largest_in_batch = 0
-          gbatch.add(restore_method(userId='me',
-            body=body, fields='id',
-            deleted=options.vault, **restore_params),
-            callback=restored_message,
-            request_id=str(message_marker))
-          if len(gbatch._order) == options.batch_size:
             rewrite_line("restoring %s messages (%s/%s)" %
-              (len(gbatch._order), current, restore_count))
-            gbatch.execute()
-            gbatch = googleapiclient.http.BatchHttpRequest()
-            sqlconn.commit()
-            rewrite_line("restored %s messages (%s/%s)" %
-              (len(gbatch._order), current, restore_count))
-            current_batch_bytes = 5000
-            largest_in_batch = 0
-        if len(gbatch._order) > 0:
-          rewrite_line("restoring %s messages (%s/%s)" %
-            (len(gbatch._order), current, restore_count))
-          gbatch.execute()
-          sqlconn.commit()
-          rewrite_line("restoring %s messages (%s/%s)" %
-            (len(gbatch._order), current, restore_count))
+             (len(gbatch._order), current, restore_count))
     sqlconn.execute('DETACH mbox_resume')
     sqlconn.commit()
 
